@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ressler-dokumente",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-08-01",
+
+  // Oberfläche (HTML, CSS, JavaScript, Schriften) als statische Dateien.
+  // Der Worker läuft zuerst, damit /api/... und /sign/... bei ihm landen.
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/", "/api/*", "/sign/*"]
+  },
+
+  // Ablage der Dokumente. Der Bucket muss im Dashboard denselben Namen tragen.
+  "r2_buckets": [
+    {
+      "binding": "DOCS",
+      "bucket_name": "ressler-dokumente"
+    }
+  ],
+
+  // Nächtlicher Aufräumlauf um 03:15 UTC: löscht abgelaufene Vorgänge.
+  "triggers": {
+    "crons": ["15 3 * * *"]
+  },
+
+  // Nicht geheime Einstellungen. Passwörter gehören NICHT hierher,
+  // sondern als "Secret" ins Cloudflare-Dashboard.
+  "vars": {
+    "NOTIFY_EMAIL": "ressler.versicherung@gmail.com",
+    "RETENTION_DAYS": "14",
+    "MAIL_FROM_NAME": "Ressler Versicherung"
+  },
+
+  "observability": { "enabled": true }
+}
