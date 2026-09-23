@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Digitale Unterschrift · Ressler</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230071e3'/%3E%3Cpath d='M8 21c4-1 6-11 9-11s1 8 4 8 3-3 3-3' stroke='white' stroke-width='2.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  body { background: #ecedef; }
+  /* Kopfbereich: Titelzeile und grüner Hinweis bleiben gemeinsam oben stehen. */
+  .head {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(251,251,253,.9); backdrop-filter: saturate(180%) blur(20px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar { padding: 12px 22px; display: flex; align-items: center; gap: 12px; }
+  .head-actions { display: flex; gap: 8px; flex: none; }
+  .banner {
+    margin: 0 auto; padding: 0 16px 14px; max-width: 980px;
+  }
+  .banner-inner {
+    background: linear-gradient(180deg, #e9f9ee, #dcf4e4);
+    border: 1.5px solid rgba(52,199,89,.55);
+    border-radius: 16px;
+    color: #14532d;
+    text-align: center;
+    font-size: 19px; font-weight: 600; line-height: 1.45; letter-spacing: -0.01em;
+    padding: 16px 22px;
+    white-space: pre-line;
+    box-shadow: 0 4px 16px rgba(52,199,89,.12);
+  }
+  .tr-page { background: var(--surface-2); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .tr-page h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .tr-page p { margin: 0; font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; color: var(--ink); }
+  .tr-note {
+    background: #fff8ec; border: 1px solid rgba(255,159,10,.55); border-radius: 12px;
+    padding: 12px 14px; font-size: 13.5px; line-height: 1.5; color: #7a4a00; font-weight: 500; margin-bottom: 16px;
+  }
+  /* Feste Leiste am unteren Bildschirmrand — sie bewegt sich nie mit dem Dokument. */
+  .actionbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    background: rgba(251,251,253,.94); backdrop-filter: saturate(180%) blur(24px);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 24px rgba(0,0,0,.07);
+    padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+  }
+  .actionbar-inner {
+    max-width: 940px; margin: 0 auto;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .lang-switch { display: flex; gap: 2px; background: var(--surface-2); border-radius: 9px; padding: 2px; flex: none; }
+  .lang-switch button {
+    appearance: none; border: none; background: transparent; font-family: inherit;
+    font-size: 12px; font-weight: 500; color: var(--muted); padding: 5px 10px;
+    border-radius: 7px; cursor: pointer; transition: background .18s var(--ease), color .18s;
+  }
+  .lang-switch button[aria-pressed='true'] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-s); }
+  .progress { width: 76px; height: 5px; border-radius: 999px; background: #e2e2e6; overflow: hidden; flex: none; }
+  .progress i { display: block; height: 100%; background: var(--green); border-radius: 999px; transition: width .45s var(--ease); }
+  .docstage { padding: 26px 16px 150px; }
+  .sig-target {
+    position: absolute; border-radius: 6px; cursor: pointer;
+    border: 2px dashed var(--accent); background: rgba(0,113,227,.1);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 13px; font-weight: 500; color: var(--accent); text-align: center;
+    transition: background .2s, border-color .2s, box-shadow .2s;
+  }
+  .sig-target:hover { background: rgba(0,113,227,.18); }
+  .sig-target.pulse { animation: pulse 1.4s var(--ease) 2; }
+  .sig-target.done { border: 1px solid rgba(52,199,89,.55); background: rgba(52,199,89,.07); cursor: pointer; }
+  .sig-target.done img { max-width: 96%; max-height: 96%; }
+  .sig-target.filled-text { color: var(--ink); font-weight: 400; }
+  .sig-target.readonly { border: none; background: transparent; cursor: default; color: var(--ink); }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(0,113,227,.5); }
+    50% { box-shadow: 0 0 0 11px rgba(0,113,227,0); }
+  }
+  .note-flag {
+    position: absolute; background: #fff9ec; border: 1px solid rgba(255,159,10,.5);
+    border-radius: 9px; padding: 7px 11px; font-size: 12.5px; color: #7a4a00;
+    box-shadow: 0 2px 8px rgba(0,0,0,.07); line-height: 1.4; overflow: auto;
+  }
+  .pad { border: 1px solid var(--line-strong); border-radius: var(--radius); background: #fff; touch-action: none; width: 100%; display: block; cursor: crosshair; }
+  .typed-preview { font-family: 'Snell Roundhand', 'Apple Chancery', 'Segoe Script', cursive; font-size: 40px; }
+  @media (max-width: 640px) {
+    .docstage { padding: 14px 8px 160px; }
+    .topbar { padding: 10px 14px; flex-wrap: wrap; }
+    .head-actions { width: 100%; }
+    .head-actions .btn { flex: 1; justify-content: center; }
+    .banner-inner { font-size: 16.5px; padding: 12px 14px; }
+    .actionbar { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+    .actionbar-inner { gap: 10px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"><div style="display:grid;place-items:center;height:100vh"><div class="spinner dark"></div></div></div>
+<div class="toast-wrap" id="toasts"></div>
+<script src="/vendor/pdf.min.js"></script>
+<script src="/vendor/pdf-lib.min.js"></script>
+<script src="/vendor/fontkit.umd.min.js"></script>
+<script src="/js/pdf-tools.js"></script>
+<script src="/js/sign.js"></script>
+</body>
+</html>

@@ -21,6 +21,10 @@
     }
   ],
 
+  // Cloudflares eigene KI für die ungarische Übersetzung.
+  // Im Gratis-Tarif enthalten: 10.000 Einheiten pro Tag, rund 250 Seiten.
+  "ai": { "binding": "AI" },
+
   // Nächtlicher Aufräumlauf um 03:15 UTC: löscht abgelaufene Vorgänge.
   "triggers": {
     "crons": ["15 3 * * *"]
@@ -29,9 +33,23 @@
   // Nicht geheime Einstellungen. Passwörter gehören NICHT hierher,
   // sondern als "Secret" ins Cloudflare-Dashboard.
   "vars": {
+    // Adresse für die Benachrichtigung bei eingegangenen Unterschriften.
+    // Ohne bestätigte Absenderdomain muss sie mit der Kontoadresse bei
+    // Resend übereinstimmen — sonst lehnt Resend die Nachricht ab.
     "NOTIFY_EMAIL": "ressler.versicherung@gmail.com",
+
+    // Nach so vielen Tagen werden abgeschlossene Vorgänge automatisch gelöscht.
     "RETENTION_DAYS": "14",
-    "MAIL_FROM_NAME": "Ressler Versicherung"
+
+    "MAIL_FROM_NAME": "Ressler Versicherung",
+
+    // "1" blendet den gesamten E-Mail-Teil aus: Es lassen sich dann nur noch
+    // Signaturlinks erzeugen. Sinnvoll, solange keine eigene Absenderdomain
+    // bestätigt ist. Die Benachrichtigung an Sie funktioniert trotzdem.
+    "LINK_ONLY": "1",
+
+    // KI-Modell für die Übersetzung Deutsch -> Ungarisch.
+    "TRANSLATION_MODEL": "@cf/google/gemma-4-26b-a4b-it"
   },
 
   "observability": { "enabled": true }

@@ -18,10 +18,14 @@ pro Anfrage zur Verfügung stehen, passiert alles Rechenintensive im Browser:
 
 | Aufgabe | Wo sie läuft |
 |---|---|
+| Dokument im Baukasten erzeugen | Browser des Vermittlers |
 | Mehrere PDFs zusammenführen | Browser des Vermittlers |
 | Dokument anzeigen | Browser (pdf.js) |
 | Unterschrift ins PDF stempeln | Browser des Kunden |
 | Protokoll-PDF erzeugen | Browser des Vermittlers |
+| Text für die Übersetzung auslesen | Browser des Vermittlers |
+| Ungarische Übersetzung | Workers AI (Cloudflare) |
+| Übersetzung als PDF | Browser des Kunden |
 | Prüfsummen berechnen | Browser |
 | Speichern, Ausliefern, Protokollieren, E-Mail | Worker |
 
@@ -38,7 +42,7 @@ public/
   sign.html          Signaturseite für den Kunden
   js/admin.js        Vorgänge, Feldeditor, Versand, Download
   js/sign.js         Signaturstrecke, Unterschriftsfeld, Sprachwahl
-  js/pdf-tools.js    Zusammenführen, Stempeln, Protokoll — alles im Browser
+  js/pdf-tools.js    Baukasten, Zusammenführen, Stempeln, Protokoll — alles im Browser
   vendor/            pdf.js und pdf-lib, lokal ausgeliefert
   fonts/             Schriften für die PDF-Erzeugung
 wrangler.jsonc       Cloudflare-Konfiguration
@@ -52,7 +56,12 @@ d/<id>/meta.json     Felder, Unterzeichner, Ereignisprotokoll
 d/<id>/original.pdf  Hochgeladenes Dokument
 d/<id>/signed.pdf    Unterschriebene Fassung
 t/<token>            Verweis vom Signaturlink auf die Vorgangs-ID
+d/<id>/translation-hu.json  Ungarische Übersetzung, seitenweise
+templates.json       Gespeicherte Dokument- und Feldvorlagen
 ```
+
+Vorlagen bleiben dauerhaft gespeichert — sie enthalten keine Kundendaten, sondern nur Ihre eigenen
+Textbausteine und Feldanordnungen. Vom automatischen Aufräumen sind sie ausgenommen.
 
 ---
 
@@ -80,14 +89,6 @@ Dann `http://localhost:8787` öffnen. Die Daten liegen dabei in `.wrangler/` und
 
 ---
 
-## Unterschiede zur Server-Fassung
-
-Nicht enthalten, weil der Nutzen den Aufwand hier nicht rechtfertigt: der Dokumenten-Baukasten und
-die Vorlagenverwaltung. Beides braucht dauerhafte Ablage — genau das, was diese Fassung bewusst
-vermeidet. Wenn Sie es später doch möchten, lässt es sich ergänzen.
-
----
-
 ## Rechtlicher Rahmen
 
 Das Verfahren erzeugt eine einfache elektronische Signatur nach eIDAS mit ausführlichem Nachweis.
@@ -95,6 +96,6 @@ Für Vorgänge, die eine qualifizierte elektronische Signatur verlangen, ist zus
 Vertrauensdiensteanbieter nötig.
 
 Sie verarbeiten Unterschriften und IP-Adressen. Nehmen Sie die Anwendung ins Verzeichnis von
-Verarbeitungstätigkeiten auf, schließen Sie mit Cloudflare und Brevo einen
+Verarbeitungstätigkeiten auf, schließen Sie mit Cloudflare und Resend einen
 Auftragsverarbeitungsvertrag und ergänzen Sie Ihre Datenschutzerklärung. Ein R2-Bucket mit Standort
 EU vereinfacht das.
