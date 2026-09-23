@@ -224,10 +224,27 @@ erscheint nichts. Der Hinweis wird nicht ins PDF übernommen.
 herunterladen". Vor der Unterschrift bekommt er das Original, danach die unterschriebene Fassung.
 Beides wird im Protokoll vermerkt. Dafür ist nichts einzustellen.
 
-**Ungarische Übersetzung.** Klicken Sie auf **Übersetzung erstellen**. Seite für Seite wird der Text
-ausgelesen und von Cloudflares KI ins Ungarische übersetzt; bei einem fünfseitigen Dokument dauert
-das etwa eine halbe Minute. Danach öffnet sich die Übersetzung zur Prüfung, und Sie können jede
-Seite direkt korrigieren.
+**Ungarische Übersetzung.** Klicken Sie auf **Übersetzung erstellen**. Der Text wird ausgelesen und
+von Cloudflares KI ins Ungarische übersetzt — mehrere Seiten gleichzeitig. Während es läuft, sehen Sie
+den Fortschritt samt vergangener Zeit. Rechnen Sie grob mit 10 bis 20 Sekunden je Seite, bei einem
+fünfseitigen Vertrag also etwa einer halben bis einer Minute. Danach öffnet sich die Übersetzung zur
+Prüfung, und Sie können jede Seite direkt korrigieren.
+
+**Wenn es klemmt, zuerst den Testknopf drücken.** Unter der Übersetzungs-Karte sitzt
+*Übersetzung testen*. Der schickt einen einzigen Satz durch und sagt Ihnen in fünf Sekunden, ob die
+KI erreichbar ist, welches Modell verwendet wird und wie lange es gebraucht hat. Schlägt es fehl,
+steht dort die konkrete Ursache — etwa ein Modell, das es nicht gibt oder das einen Bezahltarif
+verlangt.
+
+Voreingestellt ist `@cf/zai-org/glm-4.7-flash`, ein schnelles mehrsprachiges Modell aus dem
+Gratis-Tarif. Wenn Ihnen die Qualität nicht reicht, können Sie in `wrangler.jsonc` bei
+`TRANSLATION_MODEL` ein anderes eintragen, etwa `@cf/google/gemma-4-26b-a4b-it` (gründlicher,
+langsamer) oder `@cf/meta/llama-4-scout-17b-16e-instruct`. Nach jeder Umstellung einmal den
+Testknopf drücken.
+
+Nichts läuft mehr endlos: Antwortet ein Modell nicht innerhalb von 45 Sekunden, bricht die
+Anwendung ab und sagt Ihnen das. Schlägt eine einzelne Seite fehl, werden die übrigen trotzdem
+übersetzt und Ihnen wird genannt, welche Seite fehlt.
 
 Prüfen Sie vor allem Beträge, Daten und Fachbegriffe. Maschinelle Übersetzungen von
 Versicherungstexten sind gut, aber nicht fehlerfrei.

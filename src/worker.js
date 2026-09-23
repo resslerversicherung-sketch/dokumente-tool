@@ -306,7 +306,7 @@ async function sendMail(env, { to, toName, subject, html, text, attachments }) {
    Rechenzeit des Workers — die 10-ms-Grenze des Gratis-Tarifs greift nicht.
    Frei sind 10.000 „Neurons" pro Tag, das reicht für rund 250 Seiten.     */
 
-const DEFAULT_TRANSLATION_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+const DEFAULT_TRANSLATION_MODEL = '@cf/zai-org/glm-4.7-flash';
 
 const TRANSLATION_PROMPT =
   'Du bist ein professioneller Übersetzer für Versicherungs- und Vertragsunterlagen. '
@@ -317,54 +317,83 @@ const TRANSLATION_PROMPT =
   + 'Versicherungsbegriff wieder. Antworte ausschließlich mit der ungarischen Übersetzung, '
   + 'ohne Einleitung, ohne Kommentar, ohne Anführungszeichen.';
 
-function splitForTranslation(text, max = 2400) {
+function splitForTranslation(text, max = 1600) {
   const parts = [];
   let current = '';
+  const push = () => { if (current.trim()) parts.push(current); current = ''; };
   for (const paragraph of String(text).split(/\n{2,}/)) {
-    if ((current + '\n\n' + paragraph).length > max && current) {
-      parts.push(current);
-      current = '';
-    }
     if (paragraph.length > max) {
-      // Überlanger Absatz: an Zeilen trennen
+      push();
       for (const line of paragraph.split('\n')) {
-        if ((current + '\n' + line).length > max && current) { parts.push(current); current = ''; }
+        if ((current + '\n' + line).length > max && current) push();
         current = current ? current + '\n' + line : line;
       }
-    } else {
-      current = current ? current + '\n\n' + paragraph : paragraph;
+      continue;
     }
+    if ((current + '\n\n' + paragraph).length > max && current) push();
+    current = current ? current + '\n\n' + paragraph : paragraph;
   }
-  if (current.trim()) parts.push(current);
+  push();
   return parts;
 }
 
 function readAiText(result) {
-  if (!result) return '';
-  if (typeof result === 'string') return result;
-  if (typeof result.response === 'string') return result.response;
-  const choice = result.choices?.[0];
-  if (choice?.message?.content) return String(choice.message.content);
-  if (typeof choice?.text === 'string') return choice.text;
-  if (typeof result.result?.response === 'string') return result.result.response;
-  return '';
+  let text = '';
+  if (!result) text = '';
+  else if (typeof result === 'string') text = result;
+  else if (typeof result.response === 'string') text = result.response;
+  else if (result.choices?.[0]?.message?.content) text = String(result.choices[0].message.content);
+  else if (typeof result.choices?.[0]?.text === 'string') text = result.choices[0].text;
+  else if (typeof result.result?.response === 'string') text = result.result.response;
+  // Manche Modelle denken sichtbar vor sich hin — das gehört nicht in die Übersetzung.
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^```[a-z]*\n?|```$/g, '').trim();
 }
 
+/** Bricht ab, statt endlos zu warten. Ohne das hängt die Oberfläche. */
+function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+  ]);
+}
+
+/** Ein Stück übersetzen — mit Zeitgrenze und einem Versuch bei Auslastung. */
+async function translateChunk(env, model, chunk) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await withTimeout(
+        env.AI.run(model, {
+          messages: [
+            { role: 'system', content: TRANSLATION_PROMPT },
+            { role: 'user', content: chunk },
+          ],
+          max_tokens: 1800,
+          temperature: 0.2,
+        }),
+        45000,
+        'Das Modell hat nach 45 Sekunden nicht geantwortet.'
+      );
+      const text = readAiText(result);
+      if (!text) throw new Error('Das Modell hat nichts zurückgegeben.');
+      return text;
+    } catch (err) {
+      lastError = err;
+      const msg = String(err?.message || err);
+      if (!/3040|capacity|429|nicht geantwortet/i.test(msg)) throw err;
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+  throw lastError;
+}
+
+/** Die Stücke einer Seite laufen gleichzeitig — das ist der Zeitgewinn. */
 async function translateText(env, text) {
   const model = env.TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
-  const out = [];
-  for (const chunk of splitForTranslation(text)) {
-    const result = await env.AI.run(model, {
-      messages: [
-        { role: 'system', content: TRANSLATION_PROMPT },
-        { role: 'user', content: chunk },
-      ],
-      max_tokens: 3000,
-      temperature: 0.2,
-    });
-    out.push(readAiText(result).trim());
-  }
-  return out.join('\n\n');
+  const chunks = splitForTranslation(text);
+  const done = await Promise.all(chunks.map((c) => translateChunk(env, model, c)));
+  return done.join('\n\n');
 }
 
 function aiErrorMessage(err) {
@@ -374,6 +403,15 @@ function aiErrorMessage(err) {
   }
   if (msg.includes('3040') || /capacity/i.test(msg)) {
     return 'Die Übersetzung ist gerade ausgelastet. Bitte in einer Minute erneut versuchen.';
+  }
+  if (msg.includes('5035') || /Workers Paid plan/i.test(msg)) {
+    return 'Dieses KI-Modell ist im Gratis-Tarif nicht verfügbar. Tragen Sie in wrangler.jsonc bei TRANSLATION_MODEL ein anderes Modell ein.';
+  }
+  if (/No such model|not found|invalid model/i.test(msg)) {
+    return 'Das eingetragene KI-Modell gibt es nicht. Bitte TRANSLATION_MODEL in wrangler.jsonc prüfen.';
+  }
+  if (/nicht geantwortet|nichts zurückgegeben/i.test(msg)) {
+    return msg + ' Versuchen Sie ein anderes Modell über TRANSLATION_MODEL in wrangler.jsonc.';
   }
   return 'Übersetzung fehlgeschlagen: ' + msg.slice(0, 200);
 }
@@ -632,6 +670,18 @@ async function handleApi(request, env, ctx, url) {
   const session = await readSession(env, cookieValue(request, COOKIE));
   if (!session) return bad('Nicht angemeldet', 401);
 
+  if (path === 'ai-test' && method === 'POST') {
+    const model = env.TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
+    if (!env.AI) return json({ ok: false, model, error: 'Workers AI ist nicht eingebunden (Eintrag "ai" fehlt in wrangler.jsonc).' });
+    const started = Date.now();
+    try {
+      const text = await translateChunk(env, model, 'Guten Tag, bitte unterschreiben Sie das beiliegende Dokument.');
+      return json({ ok: true, model, ms: Date.now() - started, text });
+    } catch (err) {
+      return json({ ok: false, model, ms: Date.now() - started, error: aiErrorMessage(err), raw: String(err?.message || err).slice(0, 300) });
+    }
+  }
+
   if (path === 'templates' && method === 'GET') {
     return json((await readJson(env, 'templates.json')) || []);
   }
@@ -778,28 +828,12 @@ async function handleApi(request, env, ctx, url) {
         return bad('Ungültige Seitenangabe.');
       }
       const text = String(body.text || '').slice(0, 15000);
-      let translated = '';
-      if (text.trim()) {
-        try { translated = await translateText(env, text); }
-        catch (err) { return bad(aiErrorMessage(err), 502); }
+      if (!text.trim()) return json({ page, text: '' });
+      try {
+        return json({ page, text: await translateText(env, text) });
+      } catch (err) {
+        return bad(aiErrorMessage(err), 502);
       }
-      const key = `d/${id}/translation-hu.json`;
-      const stored = (body.fresh ? null : await readJson(env, key)) || { pages: [], createdAt: new Date().toISOString() };
-      stored.pages[page] = translated;
-      stored.model = env.TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
-      stored.updatedAt = new Date().toISOString();
-      await writeJson(env, key, stored);
-
-      if (body.last) {
-        doc.translation = { ready: true, createdAt: new Date().toISOString(), model: stored.model, edited: false };
-        doc.events.push(auditContext(request, {
-          type: 'translation_created',
-          detail: `Maschinelle Übersetzung ins Ungarische, ${doc.pageCount} Seite(n)`,
-        }));
-        await writeJson(env, `d/${id}/meta.json`, doc);
-        await updateIndex(env, doc);
-      }
-      return json({ page, text: translated });
     }
 
     if (action === 'translation' && method === 'GET') {
@@ -810,15 +844,26 @@ async function handleApi(request, env, ctx, url) {
       if (doc.status === 'completed') return bad('Der Vorgang ist bereits abgeschlossen.', 409);
       const body = await request.json().catch(() => ({}));
       if (!Array.isArray(body.pages)) return bad('Keine Seiten übergeben.');
+      const initial = body.initial === true;
       const key = `d/${id}/translation-hu.json`;
       const stored = (await readJson(env, key)) || { createdAt: new Date().toISOString() };
       stored.pages = body.pages.slice(0, 60).map((t) => String(t || '').slice(0, 30000));
       stored.updatedAt = new Date().toISOString();
-      stored.edited = true;
+      stored.model = env.TRANSLATION_MODEL || DEFAULT_TRANSLATION_MODEL;
+      stored.edited = !initial;
       await writeJson(env, key, stored);
-      doc.translation = { ...(doc.translation || {}), ready: true, edited: true };
-      doc.events.push(auditContext(request, { type: 'translation_edited', detail: 'Übersetzung vom Vermittler überarbeitet' }));
+      doc.translation = {
+        ...(doc.translation || {}),
+        ready: true,
+        model: stored.model,
+        createdAt: initial ? new Date().toISOString() : (doc.translation?.createdAt || new Date().toISOString()),
+        edited: !initial,
+      };
+      doc.events.push(auditContext(request, initial
+        ? { type: 'translation_created', detail: `Maschinelle Übersetzung ins Ungarische, ${doc.pageCount} Seite(n)` }
+        : { type: 'translation_edited', detail: 'Übersetzung vom Vermittler überarbeitet' }));
       await writeJson(env, `d/${id}/meta.json`, doc);
+      await updateIndex(env, doc);
       return json({ ok: true });
     }
 

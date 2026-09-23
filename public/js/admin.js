@@ -885,11 +885,14 @@ function translationCard() {
     ` : `
       <p class="tiny muted" style="line-height:1.5;margin-bottom:12px">
         Der Kunde kann sich den Inhalt auf Ungarisch ansehen. Verbindlich bleibt das deutsche Original —
-        darauf wird er ausdrücklich hingewiesen.
+        darauf wird er ausdrücklich hingewiesen. Rechnen Sie mit etwa 10 bis 20 Sekunden je Seite.
       </p>
       <button class="btn small block" id="trCreate">Übersetzung erstellen</button>
     `}
     <div id="trProgress" class="tiny muted" style="margin-top:10px;display:none"></div>
+    <hr class="sep" style="margin:14px 0 10px">
+    <button class="btn ghost small block" id="trTest">Übersetzung testen (5 Sekunden)</button>
+    <div id="trTestOut" class="tiny" style="margin-top:8px;display:none;line-height:1.5"></div>
   </div>`;
 }
 
@@ -904,6 +907,29 @@ function wireTranslationCard() {
     runTranslation(redo);
   });
   if (view) view.addEventListener('click', openTranslationEditor);
+
+  const test = document.getElementById('trTest');
+  if (test) test.addEventListener('click', async () => {
+    const out = document.getElementById('trTestOut');
+    test.disabled = true;
+    test.innerHTML = '<span class="spinner dark"></span> Test läuft …';
+    out.style.display = 'block';
+    out.innerHTML = '<span class="muted">Ein Satz wird übersetzt …</span>';
+    try {
+      const r = await api('/api/ai-test', { method: 'POST' });
+      out.innerHTML = r.ok
+        ? `<span style="color:var(--green)">✓ Funktioniert</span> — ${r.ms} ms<br>
+           <span class="muted">Modell: ${esc(r.model)}</span><br>
+           <span class="muted">Ergebnis: ${esc(r.text)}</span>`
+        : `<span style="color:var(--red)">✕ ${esc(r.error)}</span><br>
+           <span class="muted">Modell: ${esc(r.model)}</span>
+           ${r.raw ? `<br><span class="muted">Meldung: ${esc(r.raw)}</span>` : ''}`;
+    } catch (err) {
+      out.innerHTML = `<span style="color:var(--red)">✕ ${esc(err.message)}</span>`;
+    }
+    test.disabled = false;
+    test.textContent = 'Übersetzung testen (5 Sekunden)';
+  });
   if (enabled) enabled.addEventListener('change', async () => {
     state.doc.translationEnabled = enabled.checked;
     await saveDoc(false);
@@ -916,31 +942,77 @@ async function runTranslation(button) {
   const progress = document.getElementById('trProgress');
   button.disabled = true;
   progress.style.display = 'block';
+  const started = Date.now();
+
   try {
     await saveDoc(false);
     const count = state.pdfDoc.numPages;
-    let emptyPages = 0;
-    for (let i = 0; i < count; i++) {
-      progress.textContent = `Seite ${i + 1} von ${count} wird übersetzt …`;
-      const text = await PDFTools.pageText(state.pdfDoc, i);
-      if (!text) emptyPages++;
-      await api(`/api/documents/${doc.id}/translate`, {
-        method: 'POST',
-        body: { page: i, text, fresh: i === 0, last: i === count - 1 },
-      });
+
+    // Text aller Seiten auslesen — das geht schnell und passiert im Browser.
+    progress.textContent = 'Text wird ausgelesen …';
+    const texts = [];
+    for (let i = 0; i < count; i++) texts.push(await PDFTools.pageText(state.pdfDoc, i));
+    const emptyPages = texts.filter((t) => !t).length;
+
+    if (emptyPages === count) {
+      progress.textContent = '';
+      button.disabled = false;
+      return toast('Im Dokument wurde kein Text gefunden — vermutlich ein Scan. Scans lassen sich nicht übersetzen.', 'err');
     }
+
+    // Mehrere Seiten gleichzeitig übersetzen. Drei parallel ist ein guter
+    // Kompromiss: deutlich schneller, ohne die Grenzen von Workers AI zu reißen.
+    const pages = new Array(count).fill('');
+    let finished = 0;
+    const tick = () => {
+      const seconds = Math.round((Date.now() - started) / 1000);
+      progress.textContent = `${finished} von ${count} Seiten übersetzt · ${seconds} s`;
+    };
+    tick();
+
+    let next = 0;
+    const failures = [];
+    const worker = async () => {
+      while (next < count) {
+        const i = next++;
+        if (!texts[i]) { finished++; tick(); continue; }
+        try {
+          const res = await api(`/api/documents/${doc.id}/translate`, {
+            method: 'POST',
+            body: { page: i, text: texts[i] },
+            // Notbremse: ohne sie wartet die Oberfläche endlos.
+            signal: AbortSignal.timeout(180000),
+          });
+          pages[i] = res.text;
+        } catch (err) {
+          failures.push({ page: i + 1, message: err.name === 'TimeoutError' ? 'Zeitüberschreitung' : err.message });
+        }
+        finished++;
+        tick();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, count) }, worker));
+
+    if (failures.length === count - emptyPages) {
+      progress.textContent = '';
+      button.disabled = false;
+      return toast('Keine Seite konnte übersetzt werden: ' + failures[0].message, 'err');
+    }
+
+    progress.textContent = 'Wird gespeichert …';
+    await api(`/api/documents/${doc.id}/translation`, { method: 'PUT', body: { pages, initial: true } });
     state.doc = await api('/api/documents/' + doc.id);
     state.doc.translationEnabled = true;
     await saveDoc(false);
     renderInspector();
-    if (emptyPages === count) {
-      toast('Im Dokument wurde kein Text gefunden — vermutlich ein Scan. Scans lassen sich nicht übersetzen.', 'err');
-    } else {
-      toast(emptyPages
-        ? `Übersetzt. ${emptyPages} Seite(n) ohne lesbaren Text (z. B. Scan) wurden übersprungen.`
-        : 'Übersetzung erstellt und für den Kunden freigegeben. Bitte kurz prüfen.');
-      openTranslationEditor();
-    }
+
+    const seconds = Math.round((Date.now() - started) / 1000);
+    const notes = [];
+    if (emptyPages) notes.push(`${emptyPages} Seite(n) ohne lesbaren Text übersprungen`);
+    if (failures.length) notes.push(`Seite ${failures.map((f) => f.page).join(', ')} fehlgeschlagen`);
+    toast(`Übersetzt in ${seconds} s${notes.length ? '. ' + notes.join('. ') : ' und freigegeben'}. Bitte kurz prüfen.`,
+      failures.length ? 'err' : 'ok');
+    openTranslationEditor();
   } catch (err) {
     toast(err.message, 'err');
     progress.textContent = '';
@@ -973,7 +1045,7 @@ async function openTranslationEditor() {
   m.el.querySelector('#tSave').addEventListener('click', async () => {
     const edited = [...m.el.querySelectorAll('[data-tp]')].map((t) => t.value);
     try {
-      await api(`/api/documents/${doc.id}/translation`, { method: 'PUT', body: { pages: edited } });
+      await api(`/api/documents/${doc.id}/translation`, { method: 'PUT', body: { pages: edited, initial: false } });
       state.doc = await api('/api/documents/' + doc.id);
       m.close();
       renderInspector();
